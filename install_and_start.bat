@@ -1,36 +1,30 @@
 @echo off
-chcp 65001 >nul
-title æŠ–éŸ³ç›´æ’­ AI æè¯å™¨ - çŽ¯å¢ƒå®‰è£…ä¸Žå¯åŠ¨
+title ¶¶ÒôÖ±²¥ AI Ìá´ÊÆ÷ - »·¾³°²×°ÓëÆô¶¯
 echo ========================================================
-echo       æŠ–éŸ³ç›´æ’­ AI æè¯å™¨ - Windows é¦–æ¬¡çŽ¯å¢ƒé…ç½®
+echo       ¶¶ÒôÖ±²¥ AI Ìá´ÊÆ÷ - Windows Ê×´Î»·¾³ÅäÖÃ
 echo ========================================================
 echo.
 
 where python >nul 2>nul
 if %errorlevel% neq 0 (
-    echo ã€é”™è¯¯æç¤ºã€‘å½“å‰ç”µè„‘å°šæœªæ£€æµ‹åˆ° Python çŽ¯å¢ƒï¼
-    echo è¯·å…ˆå‰å¾€ Python å®˜ç½‘ä¸‹è½½å¹¶å®‰è£… Python:
-    echo https://www.python.org/downloads/
-    echo.
-    echo â˜… åŠ¡å¿…å‹¾é€‰åº•éƒ¨çš„ [âˆš] Add python.exe to PATH
-    echo.
+    echo [´íÎó] µ±Ç°µçÄÔÉÐÎ´¼ì²âµ½ Python »·¾³£¡
+    echo ÇëÏÈÇ°Íù https://www.python.org/downloads/ ÏÂÔØ°²×° Python
+    echo Îñ±Ø¹´Ñ¡ Add python.exe to PATH
     pause
     exit /b
 )
 
-echo 1. æ­£åœ¨å®‰è£…æ ¸å¿ƒä¾èµ– (PyQt6, openai, playwright)...
+echo 1. ÕýÔÚ°²×°ÒÀÀµ¿â...
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-
 echo.
-echo 2. æ­£åœ¨æ£€æŸ¥ Playwright æµè§ˆå™¨å†…æ ¸...
+
+echo 2. ¼ì²é Playwright ä¯ÀÀÆ÷...
 playwright install chromium
-
 echo.
-echo 3. æ­£åœ¨å¯åŠ¨æè¯å™¨...
+
+echo 3. ÕýÔÚÆô¶¯Ìá´ÊÆ÷...
 start "" pythonw main.py
-
-echo.
-echo æè¯å™¨å·²åœ¨æ¡Œé¢å¯åŠ¨ï¼æœ¬çª—å£å°†åœ¨ 3 ç§’åŽè‡ªåŠ¨å…³é—­...
+echo Ìá´ÊÆ÷ÒÑÔÚ×ÀÃæÆô¶¯£¡
 timeout /t 3 >nul
 exit

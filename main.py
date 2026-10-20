@@ -147,8 +147,9 @@ class KernelInstallerWorker(QThread):
     finished_signal = pyqtSignal(bool, str)
 
     def run(self):
-        import subprocess
-        self.status_signal.emit("⏳ 正在自动下载 Chromium 浏览器内核 (约 150MB)，请稍候...")
+        import subprocess, os
+        os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/playwright/"
+        self.status_signal.emit("⏳ 正在通过国内镜像高速下载 Chromium 浏览器内核 (约 150MB)，请稍候...")
         try:
             # 优先调用系统命令行中的 playwright，避免在 PyInstaller 下调自身 exe 产生多开
             res = subprocess.run("playwright install chromium", shell=True, capture_output=True, text=True)

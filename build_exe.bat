@@ -15,12 +15,14 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+set PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright/
+
 echo [1/3] 正在安装依赖库与打包器...
 python -m pip install --upgrade pip
 pip install pyinstaller PyQt6 openai playwright
 echo.
 
-echo [可选] 检查 Playwright 浏览器内核...
+echo [可选] 检查 Playwright 浏览器内核 (使用国内镜像)...
 playwright install chromium
 echo.
 

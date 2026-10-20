@@ -179,19 +179,10 @@ class DanmuListenerThread(QThread):
                 except Exception as launch_err:
                     err_text = str(launch_err)
                     if "Executable doesn't exist" in err_text or "playwright install" in err_text:
-                        self.status_updated.emit("⏳ 正在自动下载 Playwright Chromium 内核(仅首次需下载)...")
-                        try:
-                            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-                            self.status_updated.emit("✅ 内核安装完成，正在重新加载浏览器...")
-                            self._browser = p.chromium.launch(
-                                headless=True,
-                                args=["--disable-blink-features=AutomationControlled", "--mute-audio", "--no-sandbox"]
-                            )
-                        except Exception as dl_err:
-                            self.status_updated.emit(f"❌ 内核缺失，请在命令行执行: playwright install chromium")
-                            raise launch_err
+                        self.status_updated.emit("❌ 尚未检测到浏览器内核，请点击顶部【一键安装浏览器内核】")
                     else:
-                        raise launch_err
+                        self.status_updated.emit(f"❌ 浏览器启动异常: {err_text[:50]}")
+                    raise launch_err
 
                 context = self._browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",

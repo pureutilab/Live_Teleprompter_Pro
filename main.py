@@ -150,15 +150,15 @@ class KernelInstallerWorker(QThread):
         import subprocess
         self.status_signal.emit("⏳ 正在自动下载 Chromium 浏览器内核 (约 150MB)，请稍候...")
         try:
-            res = subprocess.run(
-                [sys.executable, "-m", "playwright", "install", "chromium"],
-                capture_output=True,
-                text=True
-            )
+            # 优先调用系统命令行中的 playwright，避免在 PyInstaller 下调自身 exe 产生多开
+            res = subprocess.run("playwright install chromium", shell=True, capture_output=True, text=True)
+            if res.returncode != 0:
+                res = subprocess.run("python -m playwright install chromium", shell=True, capture_output=True, text=True)
+
             if res.returncode == 0:
                 self.finished_signal.emit(True, "Chromium 浏览器内核已成功安装！")
             else:
-                self.finished_signal.emit(False, res.stderr or res.stdout or "下载失败")
+                self.finished_signal.emit(False, res.stderr or res.stdout or "下载未完成")
         except Exception as e:
             self.finished_signal.emit(False, str(e))
 
@@ -761,6 +761,13 @@ class TeleprompterWindow(QMainWindow):
 # 程序入口
 # ==============================================================================
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
+
+    # 防止打包 exe 时作为子进程被反复拉起弹窗
+    if len(sys.argv) > 1 and any(arg in sys.argv for arg in ["-m", "playwright", "--multiprocessing-fork"]):
+        return
+
     # 开启高 DPI 缩放适配
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

@@ -1,4 +1,5 @@
 @echo off
+chcp 936 >nul
 title Æô¶¯¶¶ÒôÖ±²¥ AI Ìá´ÊÆ÷
 
 where python >nul 2>nul
@@ -7,6 +8,10 @@ if %errorlevel% neq 0 (
     pause
     exit /b
 )
+
+set PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+set PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/chrome-for-testing
+set PLAYWRIGHT_BROWSERS_PATH=%LOCALAPPDATA%\ms-playwright
 
 start "" pythonw main.py
 if errorlevel 1 (

@@ -90,24 +90,24 @@ def save_config_to_file(room_url: str, api_key: str) -> bool:
         # 正则安全替换 DOUYIN_ROOM_URL 和 DOUYIN_LIVE_URL
         content = re.sub(
             r'DOUYIN_ROOM_URL\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'DOUYIN_ROOM_URL: str = "https://live.douyin.com/545089240259"',
+            f'DOUYIN_ROOM_URL: str = "{DOUYIN_ROOM_URL}"',
             content
         )
         content = re.sub(
             r'DOUYIN_LIVE_URL\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'DOUYIN_LIVE_URL: str = "https://live.douyin.com/545089240259"',
+            f'DOUYIN_LIVE_URL: str = "{DOUYIN_LIVE_URL}"',
             content
         )
 
         # 正则安全替换 AI_API_KEY 和 OPENAI_API_KEY
         content = re.sub(
             r'AI_API_KEY\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'AI_API_KEY: str = ""',
+            f'AI_API_KEY: str = "{AI_API_KEY}"',
             content
         )
         content = re.sub(
             r'OPENAI_API_KEY\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'OPENAI_API_KEY: str = ""',
+            f'OPENAI_API_KEY: str = "{OPENAI_API_KEY}"',
             content
         )
 

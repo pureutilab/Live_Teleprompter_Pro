@@ -4,6 +4,7 @@ Live_Teleprompter_Pro 主程序
 基于 PyQt6 构建的独立置顶主播提词器客户端
 """
 
+import os
 import sys
 import datetime
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QThread, pyqtSignal
@@ -13,6 +14,38 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QCheckBox, QScrollArea, QFrame, QSizePolicy,
     QGraphicsDropShadowEffect, QLineEdit, QMessageBox
 )
+
+# 国内镜像加速配置 (无末尾斜杠)
+os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/playwright"
+os.environ["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/chrome-for-testing"
+
+# Windows 下统一浏览器内核目录到全局 %LOCALAPPDATA%\ms-playwright
+if sys.platform == "win32":
+    _local_app = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
+    _global_pw = os.path.join(_local_app, "ms-playwright")
+    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or os.environ.get("PLAYWRIGHT_BROWSERS_PATH") == "0":
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _global_pw
+
+# Windows 平台底层拦截：禁止 Playwright 启动 Node.js 驱动子进程时弹出任何黑色 cmd 终端窗口
+if sys.platform == "win32":
+    import subprocess
+    try:
+        from playwright._impl import _transport
+        _orig_create_subprocess_exec = _transport.asyncio.create_subprocess_exec
+
+        async def _silent_create_subprocess_exec(*args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
+            startupinfo = kwargs.get("startupinfo")
+            if startupinfo is None:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                kwargs["startupinfo"] = startupinfo
+            return await _orig_create_subprocess_exec(*args, **kwargs)
+
+        _transport.asyncio.create_subprocess_exec = _silent_create_subprocess_exec
+    except Exception:
+        pass
 
 import config
 from danmu_listener import DanmuListenerThread
@@ -142,26 +175,72 @@ class PrompterCard(QFrame):
 
 
 class KernelInstallerWorker(QThread):
-    """后台下载安装 Playwright Chromium 内核"""
+    """后台下载安装 Playwright Chromium 内核 (支持国内镜像加速与实时进度)"""
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
 
     def run(self):
-        import subprocess, os
-        os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/playwright/"
-        self.status_signal.emit("⏳ 正在通过国内镜像高速下载 Chromium 浏览器内核 (约 150MB)，请稍候...")
-        try:
-            # 优先调用系统命令行中的 playwright，避免在 PyInstaller 下调自身 exe 产生多开
-            res = subprocess.run("playwright install chromium", shell=True, capture_output=True, text=True)
-            if res.returncode != 0:
-                res = subprocess.run("python -m playwright install chromium", shell=True, capture_output=True, text=True)
+        import subprocess
+        import os
+        import sys
 
-            if res.returncode == 0:
-                self.finished_signal.emit(True, "Chromium 浏览器内核已成功安装！")
-            else:
-                self.finished_signal.emit(False, res.stderr or res.stdout or "下载未完成")
-        except Exception as e:
-            self.finished_signal.emit(False, str(e))
+        os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/playwright"
+        os.environ["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/chrome-for-testing"
+        if sys.platform == "win32":
+            _local_app = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(_local_app, "ms-playwright")
+
+        self.status_signal.emit("⏳ 正在连接阿里云镜像下载 Chromium 内核 (约 140MB)...")
+
+        creationflags = 0
+        startupinfo = None
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
+        # 首先尝试 python -m playwright install chromium
+        cmds = [
+            "python -m playwright install chromium",
+            "playwright install chromium"
+        ]
+
+        success = False
+        last_error = ""
+
+        for cmd in cmds:
+            try:
+                p = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    creationflags=creationflags,
+                    startupinfo=startupinfo,
+                    bufsize=1
+                )
+                output_lines = []
+                for line in p.stdout:
+                    line_str = line.strip()
+                    if line_str:
+                        output_lines.append(line_str)
+                        if "%" in line_str or "Downloading" in line_str or "Mb" in line_str:
+                            self.status_signal.emit(f"⏳ 内核下载中: {line_str}")
+                p.wait()
+                if p.returncode == 0:
+                    success = True
+                    break
+                else:
+                    last_error = "\n".join(output_lines[-3:]) if output_lines else f"退出码: {p.returncode}"
+            except Exception as e:
+                last_error = str(e)
+
+        if success:
+            self.finished_signal.emit(True, "Chromium 浏览器内核已成功安装！")
+        else:
+            self.finished_signal.emit(False, last_error or "下载未能成功完成")
 
 
 # ==============================================================================
@@ -766,7 +845,7 @@ def main():
     multiprocessing.freeze_support()
 
     # 防止打包 exe 时作为子进程被反复拉起弹窗
-    if len(sys.argv) > 1 and any(arg in sys.argv for arg in ["-m", "playwright", "--multiprocessing-fork"]):
+    if len(sys.argv) > 1 and any(arg in sys.argv for arg in ["-m", "playwright", "--multiprocessing-fork", "run-driver"]):
         return
 
     # 开启高 DPI 缩放适配

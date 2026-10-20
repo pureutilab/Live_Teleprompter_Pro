@@ -7,6 +7,8 @@ Live_Teleprompter_Pro 弹幕监听模块
 3. DanmuListenerThread: 统一的 QThread 封装，与 UI 完全解耦
 """
 
+import os
+import sys
 import time
 import random
 import re
@@ -14,6 +16,38 @@ from typing import Optional, Set
 from PyQt6.QtCore import QThread, pyqtSignal
 
 import config
+
+# 国内镜像加速配置 (无末尾斜杠)
+os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/playwright"
+os.environ["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"] = "https://cdn.npmmirror.com/binaries/chrome-for-testing"
+
+# Windows 下统一浏览器内核目录到全局 %LOCALAPPDATA%\ms-playwright，保证源码运行与打包 exe 均能识别
+if sys.platform == "win32":
+    _local_app = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
+    _global_pw = os.path.join(_local_app, "ms-playwright")
+    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ or os.environ.get("PLAYWRIGHT_BROWSERS_PATH") == "0":
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _global_pw
+
+# Windows 平台底层拦截：禁止 Playwright 启动 Node.js 驱动子进程时弹出任何 cmd/终端黑色控制台窗口
+if sys.platform == "win32":
+    import subprocess
+    try:
+        from playwright._impl import _transport
+        _orig_create_subprocess_exec = _transport.asyncio.create_subprocess_exec
+
+        async def _silent_create_subprocess_exec(*args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
+            startupinfo = kwargs.get("startupinfo")
+            if startupinfo is None:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                kwargs["startupinfo"] = startupinfo
+            return await _orig_create_subprocess_exec(*args, **kwargs)
+
+        _transport.asyncio.create_subprocess_exec = _silent_create_subprocess_exec
+    except Exception:
+        pass
 
 
 # ==============================================================================
@@ -165,7 +199,7 @@ class DanmuListenerThread(QThread):
             with sync_playwright() as p:
                 self._playwright_instance = p
 
-                # 启动无头 Chromium 浏览器 (若未下载内核自动尝试安装)
+                # 启动无头 Chromium 浏览器
                 try:
                     self._browser = p.chromium.launch(
                         headless=True,
@@ -179,10 +213,13 @@ class DanmuListenerThread(QThread):
                 except Exception as launch_err:
                     err_text = str(launch_err)
                     if "Executable doesn't exist" in err_text or "playwright install" in err_text:
-                        self.status_updated.emit("❌ 尚未检测到浏览器内核，请点击顶部【一键安装浏览器内核】")
+                        self.status_updated.emit("❌ 缺少浏览器内核！请运行【2_安装浏览器内核.bat】安装内核")
                     else:
                         self.status_updated.emit(f"❌ 浏览器启动异常: {err_text[:50]}")
-                    raise launch_err
+                    # 暂停监听循环，等待用户切换回模拟模式或安装完成后重启，杜绝频繁死循环重试
+                    while self._is_running and not self.mock_mode:
+                        time.sleep(1)
+                    return
 
                 context = self._browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",

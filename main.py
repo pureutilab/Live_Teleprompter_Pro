@@ -12,7 +12,8 @@ from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QCheckBox, QScrollArea, QFrame, QSizePolicy,
-    QGraphicsDropShadowEffect, QLineEdit, QMessageBox, QComboBox
+    QGraphicsDropShadowEffect, QLineEdit, QMessageBox, QComboBox,
+    QDialog, QTextEdit
 )
 
 # 国内镜像加速配置 (无末尾斜杠)
@@ -90,18 +91,42 @@ class PrompterCard(QFrame):
         header_layout.addStretch()
 
         # 来源标识 Badge
-        if source == "api":
-            source_badge = QLabel("⚡ AI大模型")
+        if source.startswith("api"):
+            model_tag = source.split(":", 1)[1] if ":" in source else "AI"
+            if "deepseek" in model_tag:
+                tag_name = "⚡ DeepSeek"
+            elif "gpt" in model_tag:
+                tag_name = "⚡ GPT-4o"
+            elif "qwen" in model_tag:
+                tag_name = "⚡ 通义千问"
+            elif "moonshot" in model_tag:
+                tag_name = "⚡ Kimi"
+            elif "glm" in model_tag:
+                tag_name = "⚡ 智谱GLM"
+            else:
+                tag_name = f"⚡ {model_tag[:10]}"
+
+            source_badge = QLabel(tag_name)
             source_badge.setStyleSheet(
-                "background-color: #3b1d54; color: #d8b4fe; border: 1px solid #7e22ce; "
+                "background-color: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; "
                 "font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
             )
+            source_badge.setToolTip(f"由大模型实时生成 ({model_tag})")
+        elif source.startswith("mock_fallback:"):
+            reason = source.split(":", 1)[1]
+            source_badge = QLabel(f"⚠️ 降级: {reason}")
+            source_badge.setStyleSheet(
+                "background-color: #78350f; color: #fde68a; border: 1px solid #d97706; "
+                "font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
+            )
+            source_badge.setToolTip(f"大模型接口调用异常 ({reason})，已自动降级为本地规则回答。\n请点击上方【⚡ 测试连接】排查原因。")
         else:
-            source_badge = QLabel("🤖 本地智能")
+            source_badge = QLabel("🤖 本地规则")
             source_badge.setStyleSheet(
                 "background-color: #064e3b; color: #6ee7b7; border: 1px solid #047857; "
                 "font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
             )
+            source_badge.setToolTip("免 Key 模式下的内置规则引擎回答")
         header_layout.addWidget(source_badge)
 
         # "已念" 标记按钮
@@ -584,7 +609,7 @@ class TeleprompterWindow(QMainWindow):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        self.btn_save_config = QPushButton("💾 保存配置并生效")
+        self.btn_save_config = QPushButton("💾 保存配置")
         self.btn_save_config.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_config.setStyleSheet("""
             QPushButton {
@@ -592,7 +617,7 @@ class TeleprompterWindow(QMainWindow):
                 color: #ffffff;
                 border: none;
                 border-radius: 4px;
-                padding: 6px 14px;
+                padding: 6px 12px;
                 font-size: 12px;
                 font-weight: bold;
             }
@@ -605,6 +630,50 @@ class TeleprompterWindow(QMainWindow):
         """)
         self.btn_save_config.clicked.connect(self._on_save_config)
         btn_row.addWidget(self.btn_save_config)
+
+        self.btn_test_api = QPushButton("⚡ 测试连接")
+        self.btn_test_api.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_test_api.setToolTip("向所选大模型发送一次极简测试，立即排查 Key 或余额问题")
+        self.btn_test_api.setStyleSheet("""
+            QPushButton {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3b82f6;
+            }
+            QPushButton:pressed {
+                background-color: #1d4ed8;
+            }
+        """)
+        self.btn_test_api.clicked.connect(self._on_test_api_clicked)
+        btn_row.addWidget(self.btn_test_api)
+
+        self.btn_edit_kb = QPushButton("📝 知识库")
+        self.btn_edit_kb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_edit_kb.setToolTip("查看或自定义修改主播推品知识库（支持商品名、面料尺码、物流优惠）")
+        self.btn_edit_kb.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #e2e8f0;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+                color: #ffffff;
+            }
+        """)
+        self.btn_edit_kb.clicked.connect(self._on_edit_kb_clicked)
+        btn_row.addWidget(self.btn_edit_kb)
 
         self.lbl_config_status = QLabel("修改后点击保存立即热生效并持久化")
         self.lbl_config_status.setStyleSheet("color: #64748b; font-size: 11px;")
@@ -870,6 +939,109 @@ class TeleprompterWindow(QMainWindow):
             f"• 配置文件: {file_desc}"
         )
         QMessageBox.information(self, "配置已保存", msg_detail)
+
+    def _on_test_api_clicked(self):
+        """测试当前输入的 API 配置连通性"""
+        new_key = self.txt_api_key.text().strip()
+        new_base_url = self.txt_base_url.text().strip()
+        new_model = self.txt_model_name.text().strip()
+
+        if not new_key:
+            QMessageBox.warning(
+                self, "提示",
+                "⚠️ 当前尚未输入 API Key！\n请先在上方【AI API Key】栏粘贴密钥后再进行测试。"
+            )
+            return
+
+        self.btn_test_api.setEnabled(False)
+        self.btn_test_api.setText("⏳ 测试中...")
+        QApplication.processEvents()
+
+        # 同步临时配置到 worker
+        self.ai_worker.update_api_config(new_key, new_base_url, new_model)
+        ok, msg = self.ai_worker.test_api_connection()
+
+        self.btn_test_api.setEnabled(True)
+        self.btn_test_api.setText("⚡ 测试连接")
+
+        if ok:
+            QMessageBox.information(self, "API 测试结果", msg)
+        else:
+            QMessageBox.warning(self, "API 测试结果", msg)
+
+    def _on_edit_kb_clicked(self):
+        """弹出知识库编辑器对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("📝 自定义直播间背景知识库")
+        dialog.resize(520, 480)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #111318;
+                color: #f8fafc;
+            }
+            QLabel {
+                color: #cbd5e1;
+                font-size: 12px;
+            }
+            QTextEdit {
+                background-color: #0b0c10;
+                color: #f1f5f9;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                font-size: 13px;
+                line-height: 1.4;
+                padding: 8px;
+            }
+            QPushButton {
+                background-color: #2563eb;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #3b82f6;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+
+        tip = QLabel("💡 提示：大模型将严格根据下方知识库生成回答。可在此修改商品名称、尺码表、面料、物流快递、优惠信息：")
+        tip.setWordWrap(True)
+        layout.addWidget(tip)
+
+        txt_kb = QTextEdit()
+        txt_kb.setPlainText(getattr(config, "SYSTEM_KNOWLEDGE_BASE", ""))
+        layout.addWidget(txt_kb, 1)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setStyleSheet("background-color: #334155; color: #cbd5e1;")
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_save_kb = QPushButton("💾 保存并立即生效")
+        def _do_save_kb():
+            new_kb = txt_kb.toPlainText().strip()
+            if new_kb:
+                config.save_config_to_file(knowledge_base=new_kb)
+                self.ai_worker.update_knowledge_base(new_kb)
+                QMessageBox.information(dialog, "保存成功", "✅ 直播间知识库已更新！大模型将立即按照新知识库生成话术。")
+                dialog.accept()
+            else:
+                QMessageBox.warning(dialog, "警告", "知识库内容不能为空！")
+
+        btn_save_kb.clicked.connect(_do_save_kb)
+        btn_box.addWidget(btn_save_kb)
+
+        layout.addLayout(btn_box)
+        dialog.exec()
 
     def _detect_system_browser(self) -> str:
         """检测当前系统是否自带可免下载调用的 Edge / Chrome 浏览器"""

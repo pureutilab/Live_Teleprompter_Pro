@@ -96,6 +96,7 @@ class AIBrain:
         self.model = config.OPENAI_MODEL.strip()
         self.knowledge_base = config.SYSTEM_KNOWLEDGE_BASE.strip()
         self._openai_client = None
+        self.last_api_error: str = ""
         self._init_client()
 
     def _init_client(self):
@@ -120,6 +121,7 @@ class AIBrain:
             self.base_url = new_base_url.strip()
         if new_model.strip():
             self.model = new_model.strip()
+        self.last_api_error = ""
         self._init_client()
         if self.api_key and self._openai_client:
             return True, f"已接入 [{self.model}] 实时推理模式"
@@ -128,14 +130,54 @@ class AIBrain:
         else:
             return False, "客户端初始化异常，已自动降级为本地智能话术"
 
+    def update_knowledge_base(self, new_kb: str):
+        """动态更新知识库内容"""
+        self.knowledge_base = new_kb.strip()
+
     def update_api_key(self, new_key: str) -> Tuple[bool, str]:
         """兼容旧接口"""
         return self.update_api_config(new_key)
 
+    def test_api_connection(self) -> Tuple[bool, str]:
+        """主动测试 API 连接性并返回友好诊断结果"""
+        if not self.api_key:
+            return False, "⚠️ 当前未填写 API Key，处于免 Key 本地智能话术模式。"
+        if not self._openai_client:
+            self._init_client()
+        if not self._openai_client:
+            return False, "❌ OpenAI SDK 客户端初始化失败，请检查 openai 库安装。"
+
+        try:
+            t0 = time.time()
+            resp = self._openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": "测试连接，请仅回复 OK"}
+                ],
+                max_tokens=10,
+                timeout=12.0
+            )
+            elapsed = time.time() - t0
+            reply = resp.choices[0].message.content.strip()
+            return True, f"✅ API 连接测试成功！({self.model} 响应正常，耗时 {elapsed:.2f}秒)\n模型测试回复: {reply[:30]}"
+        except Exception as e:
+            err_msg = str(e)
+            self.last_api_error = err_msg
+            if "401" in err_msg or "Authentication Fails" in err_msg or "invalid_request_error" in err_msg:
+                return False, f"❌ API Key 无效或未激活 (401 Unauthorized)\n请核对是否从平台控制台完整复制了密钥，注意不要带有前后空格。"
+            elif "402" in err_msg or "Insufficient Balance" in err_msg or "balance" in err_msg.lower():
+                return False, f"❌ 账户余额不足 (402 Insufficient Balance)\n您的账户暂无可用余额，请登录服务商平台充值 1~2 元后即可正常使用。"
+            elif "429" in err_msg or "rate limit" in err_msg.lower():
+                return False, f"❌ 触发频率限制或官方服务器繁忙 (429 Rate Limit)\n服务商当前负载较高，稍等片刻后会自动恢复。"
+            elif "Connection error" in err_msg or "ConnectTimeout" in err_msg:
+                return False, f"❌ 无法连接到服务器 (网络连接超时)\n请检查网络连接，或核对 Base URL 地址 ({self.base_url})。"
+            else:
+                return False, f"❌ API 连接失败: {err_msg[:120]}"
+
     def answer_question(self, nickname: str, question: str) -> Optional[Tuple[str, str]]:
         """
         对提问生成口播回答话术
-        返回: (回答话术文本, 来源类型标识 'api' 或 'mock')
+        返回: (回答话术文本, 来源类型标识 'api:model' 或 'mock' 或 'mock_fallback:reason')
         若 AI 判断为非问题返回 None
         """
         # 1. 若无 API Key 或客户端初始化失败，直接触发本地智能降级引擎
@@ -163,7 +205,8 @@ class AIBrain:
                     {"role": "user", "content": f"粉丝【{nickname}】提问：{question}"}
                 ],
                 temperature=0.3,
-                max_tokens=100
+                max_tokens=100,
+                timeout=10.0
             )
 
             raw_text = response.choices[0].message.content.strip()
@@ -177,12 +220,23 @@ class AIBrain:
             elif clean_text.startswith("主播口播："):
                 clean_text = clean_text[5:]
 
-            return clean_text[:50], "api"
+            return clean_text[:50], f"api:{self.model}"
 
         except Exception as e:
-            # API 调用异常时优雅降级到本地智能回复
-            print(f"[AIBrain] API 调用异常，降级到本地规则: {e}")
-            return self._local_smart_mock_reply(nickname, question), "mock"
+            # API 调用异常时优雅降级到本地智能回复，并记录具体原因
+            err_str = str(e)
+            self.last_api_error = err_str
+            print(f"[AIBrain] API 调用异常，降级到本地规则: {err_str[:120]}")
+            fail_reason = "接口异常"
+            if "401" in err_str:
+                fail_reason = "Key无效(401)"
+            elif "402" in err_str or "balance" in err_str.lower():
+                fail_reason = "余额不足(402)"
+            elif "429" in err_str:
+                fail_reason = "服务繁忙(429)"
+            elif "timeout" in err_str.lower() or "connection" in err_str.lower():
+                fail_reason = "连接超时"
+            return self._local_smart_mock_reply(nickname, question), f"mock_fallback:{fail_reason}"
 
     def _local_smart_mock_reply(self, nickname: str, question: str) -> str:
         """
@@ -272,6 +326,15 @@ class AIEngineWorker(QThread):
         ok, msg = self.brain.update_api_config(new_key, new_base_url, new_model)
         self.status_updated.emit(f"🧠 AI 配置更新: {msg}")
         return ok, msg
+
+    def update_knowledge_base(self, new_kb: str):
+        """动态更新知识库内容"""
+        self.brain.update_knowledge_base(new_kb)
+        self.status_updated.emit("🧠 直播间知识库已更新生效")
+
+    def test_api_connection(self) -> Tuple[bool, str]:
+        """测试 API 连接"""
+        return self.brain.test_api_connection()
 
     def update_api_key(self, new_key: str) -> Tuple[bool, str]:
         """兼容旧接口"""

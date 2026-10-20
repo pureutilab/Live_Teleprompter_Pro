@@ -69,20 +69,24 @@ if getattr(sys, "frozen", False):
 else:
     CONFIG_FILE_PATH = os.path.abspath(__file__)
 
-def save_config_to_file(room_url: str, api_key: str, base_url: str = "", model_name: str = "") -> bool:
+def save_config_to_file(room_url: str = "", api_key: str = "", base_url: str = "", model_name: str = "", knowledge_base: str = "") -> bool:
     """
-    将动态修改的直播间网址、AI API Key、Base URL 与 Model Name 持久化写回 config.py，
+    将动态修改的直播间网址、AI API Key、Base URL、Model Name 与知识库持久化写回 config.py，
     并同步更新当前 Python 进程内存中的配置变量。
     """
-    global DOUYIN_ROOM_URL, DOUYIN_LIVE_URL, AI_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
-    DOUYIN_ROOM_URL = room_url.strip()
-    DOUYIN_LIVE_URL = room_url.strip()
-    AI_API_KEY = api_key.strip()
-    OPENAI_API_KEY = api_key.strip()
-    if base_url.strip():
+    global DOUYIN_ROOM_URL, DOUYIN_LIVE_URL, AI_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, SYSTEM_KNOWLEDGE_BASE
+    if room_url and room_url.strip():
+        DOUYIN_ROOM_URL = room_url.strip()
+        DOUYIN_LIVE_URL = room_url.strip()
+    if api_key is not None:
+        AI_API_KEY = api_key.strip()
+        OPENAI_API_KEY = api_key.strip()
+    if base_url and base_url.strip():
         OPENAI_BASE_URL = base_url.strip()
-    if model_name.strip():
+    if model_name and model_name.strip():
         OPENAI_MODEL = model_name.strip()
+    if knowledge_base and knowledge_base.strip():
+        SYSTEM_KNOWLEDGE_BASE = knowledge_base.strip()
 
     try:
         if not os.path.exists(CONFIG_FILE_PATH):

@@ -7,6 +7,14 @@
 
 ---
 
+## 📸 运行效果预览 (Preview)
+
+<p align="center">
+  <img src="assets/preview.png" alt="抖音直播 AI 实时提词器运行效果" width="560" />
+</p>
+
+---
+
 ## 🌟 核心特性
 1. **双模式弹幕源**：
    - **模拟模式（默认开启）**：每隔 2.5~4 秒自动生成仿真水弹幕与真实商品疑问，零成本本地调试。
@@ -72,6 +80,8 @@ python main.py
 ## 📁 文件结构
 ```text
 Live_Teleprompter_Pro/
+├── assets/
+│   └── preview.png        # 提词器实际运行效果预览图
 ├── README.md              # 项目说明文档
 ├── build_exe.bat          # Windows 一键打包 EXE 脚本
 ├── 启动提词器.bat          # Windows 一键静默启动快捷脚本

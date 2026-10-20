@@ -148,69 +148,107 @@ class DanmuListenerThread(QThread):
     # 真实模式执行逻辑 (Playwright 网页监听)
     # ==========================================================================
     def _run_playwright_loop(self):
-        from playwright.sync_api import sync_playwright
+        import sys
+        import subprocess
 
         self.status_updated.emit(f"🌐 正在启动 Playwright 引擎监听: {self.live_url}")
         self._seen_danmu_keys.clear()
 
         try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.status_updated.emit("❌ 未安装 Playwright 库，请运行: pip install playwright")
+            time.sleep(3)
+            return
+
+        try:
             with sync_playwright() as p:
                 self._playwright_instance = p
-                # 启动无头 Chromium 浏览器，模拟主流桌面环境
-                self._browser = p.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--mute-audio",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage"
-                    ]
-                )
+
+                # 启动无头 Chromium 浏览器 (若未下载内核自动尝试安装)
+                try:
+                    self._browser = p.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--mute-audio",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage"
+                        ]
+                    )
+                except Exception as launch_err:
+                    err_text = str(launch_err)
+                    if "Executable doesn't exist" in err_text or "playwright install" in err_text:
+                        self.status_updated.emit("⏳ 正在自动下载 Playwright Chromium 内核(仅首次需下载)...")
+                        try:
+                            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+                            self.status_updated.emit("✅ 内核安装完成，正在重新加载浏览器...")
+                            self._browser = p.chromium.launch(
+                                headless=True,
+                                args=["--disable-blink-features=AutomationControlled", "--mute-audio", "--no-sandbox"]
+                            )
+                        except Exception as dl_err:
+                            self.status_updated.emit(f"❌ 内核缺失，请在命令行执行: playwright install chromium")
+                            raise launch_err
+                    else:
+                        raise launch_err
+
                 context = self._browser.new_context(
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     viewport={"width": 1280, "height": 800}
                 )
                 page = context.new_page()
 
-                # 屏蔽图片、字体、媒体流等资源加速加载并节省流量
+                # 仅屏蔽大型音视频媒体流，防止阻塞直播推流带宽
                 page.route(
-                    "**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2,ttf,mp4,flv,m3u8,ts}",
+                    "**/*.{mp4,flv,m3u8,ts,avi,mov}",
                     lambda route: route.abort()
                 )
 
-                self.status_updated.emit("⏳ 正在打开抖音直播间网页...")
+                self.status_updated.emit("⏳ 正在连接抖音直播间网页...")
                 try:
-                    page.goto(self.live_url, timeout=30000, wait_until="domcontentloaded")
+                    page.goto(self.live_url, timeout=20000, wait_until="commit")
                 except Exception as e:
-                    self.status_updated.emit(f"⚠️ 直播间加载警告 (仍将尝试解析): {e}")
+                    self.status_updated.emit(f"⚠️ 直播间连接提示 (仍将尝试解析): {e}")
 
-                self.status_updated.emit("✅ 直播间连接成功！开始实时监控公屏聊天区...")
+                # 检查开播状态
+                time.sleep(2.0)
+                try:
+                    page_content = page.content()
+                    if any(k in page_content for k in ["暂时不在家", "已关播", "主播未开播", "直播已结束"]):
+                        self.status_updated.emit("⚠️ 当前直播间尚未开播或处于离线状态，正在持续守候中...")
+                    else:
+                        self.status_updated.emit("✅ 直播间连接成功！开始实时监控公屏聊天区...")
+                except Exception:
+                    self.status_updated.emit("✅ 监控已启动，正在实时捕捉公屏互动...")
 
                 # 循环轮询 DOM 提取公屏弹幕
                 while self._is_running and not self.mock_mode:
                     try:
                         new_messages = self._extract_danmu_from_page(page)
                         for nick, text in new_messages:
-                            # 去重并验证内容有效性
                             key = f"{nick}:{text}"
                             if key not in self._seen_danmu_keys:
                                 self._seen_danmu_keys.add(key)
                                 if len(self._seen_danmu_keys) > 1000:
-                                    # 控制去重集合容量
                                     self._seen_danmu_keys.pop()
                                 self.danmu_received.emit(nick, text)
                     except Exception as err:
-                        self.status_updated.emit(f"⚠️ 公屏解析瞬态重试: {str(err)[:60]}")
+                        self.status_updated.emit(f"⚠️ 公屏解析瞬态重试: {str(err)[:50]}")
 
-                    # 轮询频率 0.8 ~ 1.2 秒
+                    # 轮询频率 0.8 ~ 1.0 秒
                     for _ in range(5):
                         if not self._is_running or self.mock_mode:
                             break
                         time.sleep(0.2)
 
         except Exception as e:
-            self.status_updated.emit(f"❌ 真实监听模式异常: {e}")
-            # 出错时短暂等待以防死循环
+            err_msg = str(e)
+            if "Target closed" in err_msg or "Target page" in err_msg:
+                self.status_updated.emit("🔄 监听服务已重置，等待下一次循环...")
+            else:
+                self.status_updated.emit(f"❌ 真实模式提示: {err_msg[:60]}")
+            # 短暂等待以防循环过频
             for _ in range(15):
                 if not self._is_running or self.mock_mode:
                     break
@@ -233,14 +271,14 @@ class DanmuListenerThread(QThread):
             const results = [];
             // 常见抖音公屏容器选择器
             const items = document.querySelectorAll(
-                'div[class*="webcast-chatroom___item"], div[class*="webcast-chatroom___list"] > div, .chatroom-item'
+                'div[class*="webcast-chatroom___item"], div[class*="webcast-chatroom___list"] > div, .chatroom-item, div[class*="chat-item"]'
             );
             
             for (let i = 0; i < items.length; i++) {
                 const el = items[i];
-                // 排除系统入场与关注提示
-                const fullText = el.innerText || el.textContent || '';
-                if (!fullText || fullText.includes('来了') && fullText.includes('欢迎') || fullText.includes('送出了')) {
+                const fullText = (el.innerText || el.textContent || '').trim();
+                if (!fullText) continue;
+                if (fullText.includes('来了') && fullText.includes('欢迎') || fullText.includes('送出了') || fullText.includes('加入直播间')) {
                     continue;
                 }
                 
@@ -254,15 +292,15 @@ class DanmuListenerThread(QThread):
                     if (n && c) results.push([n, c]);
                 } else {
                     // 兼容格式："昵称：弹幕文本"
-                    const parts = fullText.split(/[:：]/);
-                    if (parts.length >= 2) {
-                        const n = parts[0].trim().slice(-15);
-                        const c = parts.slice(1).join('：').trim();
+                    const colonIdx = fullText.search(/[:：]/);
+                    if (colonIdx > 0 && colonIdx < 30) {
+                        const n = fullText.slice(0, colonIdx).trim().slice(-12);
+                        const c = fullText.slice(colonIdx + 1).trim();
                         if (n && c) results.push([n, c]);
                     }
                 }
             }
-            return results.slice(-20); // 取最新20条
+            return results.slice(-25);
         }
         """
         try:

@@ -141,6 +141,28 @@ class PrompterCard(QFrame):
         self._apply_style()
 
 
+class KernelInstallerWorker(QThread):
+    """后台下载安装 Playwright Chromium 内核"""
+    status_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(bool, str)
+
+    def run(self):
+        import subprocess
+        self.status_signal.emit("⏳ 正在自动下载 Chromium 浏览器内核 (约 150MB)，请稍候...")
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True
+            )
+            if res.returncode == 0:
+                self.finished_signal.emit(True, "Chromium 浏览器内核已成功安装！")
+            else:
+                self.finished_signal.emit(False, res.stderr or res.stdout or "下载失败")
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))
+
+
 # ==============================================================================
 # UI 主窗口：独立置顶提词器 (TeleprompterWindow)
 # ==============================================================================
@@ -313,6 +335,26 @@ class TeleprompterWindow(QMainWindow):
         """)
         btn_clear.clicked.connect(self._clear_cards)
         row2_layout.addWidget(btn_clear)
+
+        # 一键安装/修复浏览器内核按钮
+        self.btn_install_kernel = QPushButton("🌐 一键安装浏览器内核")
+        self.btn_install_kernel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_install_kernel.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #e2e8f0;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+                color: #ffffff;
+            }
+        """)
+        self.btn_install_kernel.clicked.connect(self._on_install_kernel_clicked)
+        row2_layout.addWidget(self.btn_install_kernel)
 
         row2_layout.addStretch()
         top_layout.addLayout(row2_layout)
@@ -680,6 +722,33 @@ class TeleprompterWindow(QMainWindow):
             f"• 配置文件: {file_desc}"
         )
         QMessageBox.information(self, "配置已保存", msg_detail)
+
+    def _on_install_kernel_clicked(self):
+        """点击一键安装浏览器内核"""
+        self.btn_install_kernel.setEnabled(False)
+        self.btn_install_kernel.setText("⏳ 正在下载中...")
+        self.lbl_status_msg.setText("⏳ 正在全自动下载 Chromium 浏览器内核 (约 150MB)，请耐心等待...")
+
+        self.kernel_worker = KernelInstallerWorker(self)
+        self.kernel_worker.status_signal.connect(lambda msg: self.lbl_status_msg.setText(msg))
+        self.kernel_worker.finished_signal.connect(self._on_kernel_installed)
+        self.kernel_worker.start()
+
+    def _on_kernel_installed(self, success: bool, message: str):
+        self.btn_install_kernel.setEnabled(True)
+        self.btn_install_kernel.setText("🌐 一键安装浏览器内核")
+        if success:
+            self.lbl_status_msg.setText("✅ 浏览器内核已安装完毕，可随时切换真实模式")
+            QMessageBox.information(
+                self, "内核安装完成",
+                "✅ 浏览器内核已成功下载并安装完成！\n现在您可以点击【🔄 切换为真实网页监听】开始实时捕捉公屏了。"
+            )
+        else:
+            self.lbl_status_msg.setText(f"❌ 内核安装提示: {message[:50]}")
+            QMessageBox.warning(
+                self, "安装提示",
+                f"自动下载遇到提示：\n{message}\n\n建议在 Windows 命令行手动执行一次：\nplaywright install chromium"
+            )
 
     def closeEvent(self, event):
         """窗口关闭时安全终止后台线程"""

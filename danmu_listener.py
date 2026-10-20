@@ -199,21 +199,43 @@ class DanmuListenerThread(QThread):
             with sync_playwright() as p:
                 self._playwright_instance = p
 
-                # 启动无头 Chromium 浏览器
-                try:
-                    self._browser = p.chromium.launch(
-                        headless=True,
-                        args=[
+                # 启动无头浏览器 (按优先级自动探测：系统 Edge -> 系统 Chrome -> 本地下载的 Chromium)
+                self._browser = None
+                launch_channels = []
+                if sys.platform == "win32":
+                    # Windows 下首选自带的 Edge 或 Chrome，免下载 140MB 内核即开即用
+                    launch_channels = ["msedge", "chrome", None]
+                elif sys.platform == "darwin":
+                    launch_channels = ["chrome", "msedge", None]
+                else:
+                    launch_channels = [None, "chrome", "msedge"]
+
+                last_launch_err = None
+                for ch in launch_channels:
+                    try:
+                        args = [
                             "--disable-blink-features=AutomationControlled",
                             "--mute-audio",
                             "--no-sandbox",
                             "--disable-dev-shm-usage"
                         ]
-                    )
-                except Exception as launch_err:
-                    err_text = str(launch_err)
+                        kw = {"headless": True, "args": args}
+                        if ch:
+                            kw["channel"] = ch
+                        self._browser = p.chromium.launch(**kw)
+                        if ch:
+                            self.status_updated.emit(f"🚀 已自动调用系统自带浏览器 [{ch}]，免下载即开即用！")
+                        else:
+                            self.status_updated.emit("🚀 已成功调用 Playwright Chromium 内核！")
+                        break
+                    except Exception as le:
+                        last_launch_err = le
+                        continue
+
+                if self._browser is None:
+                    err_text = str(last_launch_err) if last_launch_err else "未找到可用浏览器"
                     if "Executable doesn't exist" in err_text or "playwright install" in err_text:
-                        self.status_updated.emit("❌ 缺少浏览器内核！请运行【2_安装浏览器内核.bat】安装内核")
+                        self.status_updated.emit("❌ 未检测到可用浏览器，请安装 Edge/Chrome 或双击【2_安装浏览器内核.bat】")
                     else:
                         self.status_updated.emit(f"❌ 浏览器启动异常: {err_text[:50]}")
                     # 暂停监听循环，等待用户切换回模拟模式或安装完成后重启，杜绝频繁死循环重试

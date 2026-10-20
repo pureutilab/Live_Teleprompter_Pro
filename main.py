@@ -416,8 +416,8 @@ class TeleprompterWindow(QMainWindow):
         btn_clear.clicked.connect(self._clear_cards)
         row2_layout.addWidget(btn_clear)
 
-        # 一键安装/修复浏览器内核按钮
-        self.btn_install_kernel = QPushButton("🌐 一键安装浏览器内核")
+        # 一键检测/安装浏览器内核按钮
+        self.btn_install_kernel = QPushButton("🌐 检测/安装浏览器内核")
         self.btn_install_kernel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_install_kernel.setStyleSheet("""
             QPushButton {
@@ -803,11 +803,52 @@ class TeleprompterWindow(QMainWindow):
         )
         QMessageBox.information(self, "配置已保存", msg_detail)
 
+    def _detect_system_browser(self) -> str:
+        """检测当前系统是否自带可免下载调用的 Edge / Chrome 浏览器"""
+        if sys.platform == "win32":
+            edge_paths = [
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+            ]
+            for p in edge_paths:
+                if os.path.exists(p):
+                    return "Microsoft Edge"
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]
+            for p in chrome_paths:
+                if os.path.exists(p):
+                    return "Google Chrome"
+        elif sys.platform == "darwin":
+            if os.path.exists("/Applications/Google Chrome.app"):
+                return "Google Chrome"
+            if os.path.exists("/Applications/Microsoft Edge.app"):
+                return "Microsoft Edge"
+        return ""
+
     def _on_install_kernel_clicked(self):
-        """点击一键安装浏览器内核"""
+        """点击一键检测/安装浏览器内核"""
+        sys_browser = self._detect_system_browser()
+        if sys_browser:
+            self.lbl_status_msg.setText(f"✅ 已检测到系统自带 {sys_browser}，免下载即开即用！")
+            ret = QMessageBox.question(
+                self, "已检测到可用浏览器",
+                f"🎉 检测到当前系统已预装 【{sys_browser}】！\n\n"
+                f"提词器已支持直接免下载调用该浏览器。\n"
+                f"您可以直接点击【🔄 切换为真实网页监听】正常开启公屏监控。\n\n"
+                f"是否仍要继续通过国内镜像下载独立的 Chromium 内核？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if ret == QMessageBox.StandardButton.No:
+                return
+
         self.btn_install_kernel.setEnabled(False)
         self.btn_install_kernel.setText("⏳ 正在下载中...")
-        self.lbl_status_msg.setText("⏳ 正在全自动下载 Chromium 浏览器内核 (约 150MB)，请耐心等待...")
+        self.lbl_status_msg.setText("⏳ 正在全自动下载 Chromium 浏览器内核 (约 140MB)，请耐心等待...")
 
         self.kernel_worker = KernelInstallerWorker(self)
         self.kernel_worker.status_signal.connect(lambda msg: self.lbl_status_msg.setText(msg))
@@ -816,7 +857,7 @@ class TeleprompterWindow(QMainWindow):
 
     def _on_kernel_installed(self, success: bool, message: str):
         self.btn_install_kernel.setEnabled(True)
-        self.btn_install_kernel.setText("🌐 一键安装浏览器内核")
+        self.btn_install_kernel.setText("🌐 检测/安装浏览器内核")
         if success:
             self.lbl_status_msg.setText("✅ 浏览器内核已安装完毕，可随时切换真实模式")
             QMessageBox.information(

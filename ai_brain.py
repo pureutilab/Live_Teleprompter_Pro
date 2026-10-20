@@ -113,16 +113,24 @@ class AIBrain:
         else:
             self._openai_client = None
 
-    def update_api_key(self, new_key: str) -> Tuple[bool, str]:
-        """动态更新 API Key 并重新初始化客户端"""
+    def update_api_config(self, new_key: str, new_base_url: str = "", new_model: str = "") -> Tuple[bool, str]:
+        """动态更新 API Key、Base URL 与 Model 并重新初始化客户端"""
         self.api_key = new_key.strip()
+        if new_base_url.strip():
+            self.base_url = new_base_url.strip()
+        if new_model.strip():
+            self.model = new_model.strip()
         self._init_client()
         if self.api_key and self._openai_client:
-            return True, "已接入大模型 API 实时推理模式"
+            return True, f"已接入 [{self.model}] 实时推理模式"
         elif not self.api_key:
             return True, "已切换为本地智能模拟回复 (免 Key 模式)"
         else:
             return False, "客户端初始化异常，已自动降级为本地智能话术"
+
+    def update_api_key(self, new_key: str) -> Tuple[bool, str]:
+        """兼容旧接口"""
+        return self.update_api_config(new_key)
 
     def answer_question(self, nickname: str, question: str) -> Optional[Tuple[str, str]]:
         """
@@ -259,11 +267,15 @@ class AIEngineWorker(QThread):
         """主线程推送待处理的初筛提问"""
         self._queue.put((nickname, question))
 
-    def update_api_key(self, new_key: str) -> Tuple[bool, str]:
-        """动态更新 API Key 并通知状态"""
-        ok, msg = self.brain.update_api_key(new_key)
+    def update_api_config(self, new_key: str, new_base_url: str = "", new_model: str = "") -> Tuple[bool, str]:
+        """动态更新 API Key、Base URL 与 Model 并通知状态"""
+        ok, msg = self.brain.update_api_config(new_key, new_base_url, new_model)
         self.status_updated.emit(f"🧠 AI 配置更新: {msg}")
         return ok, msg
+
+    def update_api_key(self, new_key: str) -> Tuple[bool, str]:
+        """兼容旧接口"""
+        return self.update_api_config(new_key)
 
     def stop(self):
         self._is_running = False

@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QCheckBox, QScrollArea, QFrame, QSizePolicy,
-    QGraphicsDropShadowEffect, QLineEdit, QMessageBox
+    QGraphicsDropShadowEffect, QLineEdit, QMessageBox, QComboBox
 )
 
 # 国内镜像加速配置 (无末尾斜杠)
@@ -458,7 +458,7 @@ class TeleprompterWindow(QMainWindow):
                 font-size: 12px;
                 font-weight: 600;
             }
-            QLineEdit {
+            QLineEdit, QComboBox {
                 background-color: #0d0f14;
                 color: #f8fafc;
                 border: 1px solid #334155;
@@ -467,8 +467,14 @@ class TeleprompterWindow(QMainWindow):
                 font-size: 12px;
                 selection-background-color: #2563eb;
             }
-            QLineEdit:focus {
+            QLineEdit:focus, QComboBox:focus {
                 border: 1px solid #3b82f6;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1e222e;
+                color: #f8fafc;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
             }
         """)
         settings_layout = QVBoxLayout(settings_frame)
@@ -488,13 +494,41 @@ class TeleprompterWindow(QMainWindow):
         url_layout.addWidget(self.txt_room_url)
         settings_layout.addLayout(url_layout)
 
-        # 输入项 2: AI API Key
+        # 输入项 2: AI 模型厂商选择
+        provider_layout = QHBoxLayout()
+        provider_layout.setSpacing(8)
+        lbl_provider = QLabel("AI 模型厂商:")
+        lbl_provider.setFixedWidth(78)
+        self.cmb_ai_provider = QComboBox()
+        providers = [
+            ("DeepSeek (推荐/国内免翻墙/极速低价)", ("https://api.deepseek.com", "deepseek-chat")),
+            ("OpenAI (GPT-4o-mini)", ("https://api.openai.com/v1", "gpt-4o-mini")),
+            ("月之暗面 Kimi (Moonshot)", ("https://api.moonshot.cn/v1", "moonshot-v1-8k")),
+            ("阿里通义千问 (Qwen-Turbo)", ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo")),
+            ("智谱 AI (GLM-4-Flash)", ("https://open.bigmodel.cn/api/paas/v4/", "glm-4-flash")),
+            ("自定义 / 自建代理 (Custom)", ("", ""))
+        ]
+        current_base = getattr(config, "OPENAI_BASE_URL", "https://api.deepseek.com").strip()
+        current_model = getattr(config, "OPENAI_MODEL", "deepseek-chat").strip()
+        matched_idx = 0
+        for idx, (name, (p_url, p_mod)) in enumerate(providers):
+            self.cmb_ai_provider.addItem(name, (p_url, p_mod))
+            if p_url and p_url in current_base:
+                matched_idx = idx
+
+        self.cmb_ai_provider.setCurrentIndex(matched_idx)
+        self.cmb_ai_provider.currentIndexChanged.connect(self._on_provider_changed)
+        provider_layout.addWidget(lbl_provider)
+        provider_layout.addWidget(self.cmb_ai_provider)
+        settings_layout.addLayout(provider_layout)
+
+        # 输入项 3: AI API Key
         key_layout = QHBoxLayout()
         key_layout.setSpacing(8)
         lbl_key = QLabel("AI API Key:")
         lbl_key.setFixedWidth(78)
         self.txt_api_key = QLineEdit()
-        self.txt_api_key.setPlaceholderText("输入 sk-... (留空则自动启用本地智能话术)")
+        self.txt_api_key.setPlaceholderText("粘贴 DeepSeek / OpenAI 的 sk-... 密钥 (留空自动启用本地智能规则)")
         self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         current_key = getattr(config, "AI_API_KEY", getattr(config, "OPENAI_API_KEY", ""))
         self.txt_api_key.setText(current_key)
@@ -524,6 +558,27 @@ class TeleprompterWindow(QMainWindow):
         key_layout.addWidget(self.txt_api_key)
         key_layout.addWidget(self.btn_toggle_key_vis)
         settings_layout.addLayout(key_layout)
+
+        # 输入项 4: 接口地址与模型名称 (自动跟随厂商联动，支持微调)
+        expert_layout = QHBoxLayout()
+        expert_layout.setSpacing(8)
+        lbl_expert = QLabel("接口与模型:")
+        lbl_expert.setFixedWidth(78)
+        self.txt_base_url = QLineEdit()
+        self.txt_base_url.setPlaceholderText("API Base URL")
+        self.txt_base_url.setText(current_base)
+        self.txt_base_url.setToolTip("接口 Base URL (根据所选厂商自动配置，亦可自定义)")
+
+        self.txt_model_name = QLineEdit()
+        self.txt_model_name.setPlaceholderText("Model Name")
+        self.txt_model_name.setText(current_model)
+        self.txt_model_name.setFixedWidth(130)
+        self.txt_model_name.setToolTip("模型名称 (如 deepseek-chat, gpt-4o-mini)")
+
+        expert_layout.addWidget(lbl_expert)
+        expert_layout.addWidget(self.txt_base_url)
+        expert_layout.addWidget(self.txt_model_name)
+        settings_layout.addLayout(expert_layout)
 
         # 行 3: 保存配置并生效按钮 + 状态提示
         btn_row = QHBoxLayout()
@@ -758,6 +813,16 @@ class TeleprompterWindow(QMainWindow):
         self.question_count = 0
         self._update_stats_display()
 
+    def _on_provider_changed(self, index: int):
+        """当用户在下拉框切换 AI 厂商时自动填充 Base URL 与模型名称"""
+        data = self.cmb_ai_provider.currentData()
+        if data:
+            base_url, model = data
+            if base_url:
+                self.txt_base_url.setText(base_url)
+            if model:
+                self.txt_model_name.setText(model)
+
     def _toggle_key_visibility(self):
         """切换 API Key 的明文/密文显示状态"""
         if self.txt_api_key.echoMode() == QLineEdit.EchoMode.Password:
@@ -771,6 +836,8 @@ class TeleprompterWindow(QMainWindow):
         """保存配置并动态生效"""
         new_url = self.txt_room_url.text().strip()
         new_key = self.txt_api_key.text().strip()
+        new_base_url = self.txt_base_url.text().strip()
+        new_model = self.txt_model_name.text().strip()
 
         # 简单规范化 URL
         if new_url and not (new_url.startswith("http://") or new_url.startswith("https://")):
@@ -778,26 +845,27 @@ class TeleprompterWindow(QMainWindow):
             self.txt_room_url.setText(new_url)
 
         # 1. 保存到 config.py 文件并更新当前内存变量
-        save_ok = config.save_config_to_file(new_url, new_key)
+        save_ok = config.save_config_to_file(new_url, new_key, new_base_url, new_model)
 
         # 2. 动态通知弹幕监听线程更新直播间地址
         self.danmu_thread.update_live_url(new_url)
 
-        # 3. 动态通知 AI 引擎线程更新 API Key
-        ai_ok, ai_msg = self.ai_worker.update_api_key(new_key)
+        # 3. 动态通知 AI 引擎线程更新 API Key、Base URL 与 Model
+        ai_ok, ai_msg = self.ai_worker.update_api_config(new_key, new_base_url, new_model)
 
         # 4. 更新界面状态与弹窗提示
         time_tag = datetime.datetime.now().strftime("%H:%M:%S")
         self.lbl_config_status.setText(f"✓ 已于 {time_tag} 保存并实时生效")
         self.lbl_config_status.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold;")
-        self.lbl_status_msg.setText("✅ 配置已保存并实时生效")
+        self.lbl_status_msg.setText(f"✅ 配置已保存并实时生效 [{new_model or '本地规则'}]")
 
-        status_desc = "大模型 API 推理模式" if new_key else "本地智能话术模式 (免 Key)"
+        status_desc = f"大模型 [{new_model}] API 推理模式" if new_key else "本地智能话术模式 (免 Key)"
         file_desc = "config.py 已同步持久化" if save_ok else "config.py 写入警告 (内存已更新)"
         msg_detail = (
             f"✅ 配置已成功保存并实时生效！\n\n"
             f"• 直播间网址: {new_url or '(未配置)'}\n"
-            f"• AI 回复模式: {status_desc}\n"
+            f"• AI 厂商模型: {status_desc}\n"
+            f"• 接口基础地址: {new_base_url}\n"
             f"• 状态提示: {ai_msg}\n"
             f"• 配置文件: {file_desc}"
         )

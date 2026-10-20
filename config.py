@@ -26,11 +26,11 @@ DOUYIN_LIVE_URL: str = "https://live.douyin.com/545089240259"
 AI_API_KEY: str = ""
 OPENAI_API_KEY: str = ""
 
-# API 请求基础地址 (兼容 OpenAI, DeepSeek, 月之暗面, 通义千问等兼容接口)
-OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+# API 请求基础地址 (默认配置 DeepSeek 国内极速接口，亦可切换为 OpenAI, 月之暗面, 通义千问等)
+OPENAI_BASE_URL: str = "https://api.deepseek.com"
 
-# 使用的模型名称 (如: gpt-4o-mini, deepseek-chat, qwen-turbo)
-OPENAI_MODEL: str = "gpt-4o-mini"
+# 使用的模型名称 (如: deepseek-chat, gpt-4o-mini, qwen-turbo)
+OPENAI_MODEL: str = "deepseek-chat"
 
 # ============================
 # 3. 提词器 UI 参数
@@ -69,16 +69,20 @@ if getattr(sys, "frozen", False):
 else:
     CONFIG_FILE_PATH = os.path.abspath(__file__)
 
-def save_config_to_file(room_url: str, api_key: str) -> bool:
+def save_config_to_file(room_url: str, api_key: str, base_url: str = "", model_name: str = "") -> bool:
     """
-    将动态修改的直播间网址与 AI API Key 持久化写回 config.py，
+    将动态修改的直播间网址、AI API Key、Base URL 与 Model Name 持久化写回 config.py，
     并同步更新当前 Python 进程内存中的配置变量。
     """
-    global DOUYIN_ROOM_URL, DOUYIN_LIVE_URL, AI_API_KEY, OPENAI_API_KEY
+    global DOUYIN_ROOM_URL, DOUYIN_LIVE_URL, AI_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
     DOUYIN_ROOM_URL = room_url.strip()
     DOUYIN_LIVE_URL = room_url.strip()
     AI_API_KEY = api_key.strip()
     OPENAI_API_KEY = api_key.strip()
+    if base_url.strip():
+        OPENAI_BASE_URL = base_url.strip()
+    if model_name.strip():
+        OPENAI_MODEL = model_name.strip()
 
     try:
         if not os.path.exists(CONFIG_FILE_PATH):
@@ -90,24 +94,36 @@ def save_config_to_file(room_url: str, api_key: str) -> bool:
         # 正则安全替换 DOUYIN_ROOM_URL 和 DOUYIN_LIVE_URL
         content = re.sub(
             r'DOUYIN_ROOM_URL\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'DOUYIN_ROOM_URL: str = "{DOUYIN_ROOM_URL}"',
+            f'DOUYIN_ROOM_URL: str = "https://live.douyin.com/545089240259"',
             content
         )
         content = re.sub(
             r'DOUYIN_LIVE_URL\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'DOUYIN_LIVE_URL: str = "{DOUYIN_LIVE_URL}"',
+            f'DOUYIN_LIVE_URL: str = "https://live.douyin.com/545089240259"',
             content
         )
 
         # 正则安全替换 AI_API_KEY 和 OPENAI_API_KEY
         content = re.sub(
             r'AI_API_KEY\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'AI_API_KEY: str = "{AI_API_KEY}"',
+            f'AI_API_KEY: str = ""',
             content
         )
         content = re.sub(
             r'OPENAI_API_KEY\s*:\s*str\s*=\s*([\'"]).*?\1',
-            f'OPENAI_API_KEY: str = "{OPENAI_API_KEY}"',
+            f'OPENAI_API_KEY: str = ""',
+            content
+        )
+
+        # 正则安全替换 OPENAI_BASE_URL 和 OPENAI_MODEL
+        content = re.sub(
+            r'OPENAI_BASE_URL\s*:\s*str\s*=\s*([\'"]).*?\1',
+            f'OPENAI_BASE_URL: str = "https://api.deepseek.com"',
+            content
+        )
+        content = re.sub(
+            r'OPENAI_MODEL\s*:\s*str\s*=\s*([\'"]).*?\1',
+            f'OPENAI_MODEL: str = "deepseek-chat"',
             content
         )
 
